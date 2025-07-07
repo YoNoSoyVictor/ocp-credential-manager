@@ -1,0 +1,65 @@
+---
+# Get OpenShift cluster ID
+# This ID is used to create a unique IAM user name for this cluster
+
+- name: Get OpenShift cluster ID from infrastructure resource
+  command: oc get infrastructure cluster -o jsonpath='{.status.infrastructureName}'
+  register: ocp_infrastructure_name
+  failed_when: ocp_infrastructure_name.rc != 0
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Get OpenShift cluster ID from ClusterVersion
+  command: oc get clusterversion version -o jsonpath='{.spec.clusterID}'
+  register: ocp_cluster_version_id
+  failed_when: ocp_cluster_version_id.rc != 0
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Get additional cluster information
+  command: oc get infrastructure cluster -o json
+  register: ocp_infrastructure_info
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Parse infrastructure information
+  set_fact:
+    ocp_infrastructure: "{{ ocp_infrastructure_info.stdout | from_json }}"
+
+- name: Set cluster ID variables
+  set_fact:
+    ocp_cluster_id: "{{ ocp_cluster_version_id.stdout }}"
+    ocp_infrastructure_name: "{{ ocp_infrastructure_name.stdout }}"
+    ocp_platform_type: "{{ ocp_infrastructure.status.platform }}"
+    ocp_region: "{{ ocp_infrastructure.status.platformStatus.aws.region | default(ocp_cco_rotation_config.aws_region) }}"
+
+- name: Verify cluster is running on AWS
+  assert:
+    that:
+      - ocp_platform_type == "AWS"
+    fail_msg: "This playbook only supports AWS-based OpenShift clusters. Detected platform: {{ ocp_platform_type }}"
+
+- name: Generate CCO IAM user name
+  set_fact:
+    cco_iam_user_name: "{{ ocp_cco_rotation_config.iam_user_prefix }}-{{ ocp_cluster_id }}"
+
+- name: Display cluster information
+  debug:
+    msg:
+      - "OpenShift Cluster ID: {{ ocp_cluster_id }}"
+      - "Infrastructure Name: {{ ocp_infrastructure_name }}"
+      - "Platform Type: {{ ocp_platform_type }}"
+      - "AWS Region: {{ ocp_region }}"
+      - "CCO IAM User Name: {{ cco_iam_user_name }}"
+
+- name: Validate cluster ID format
+  assert:
+    that:
+      - ocp_cluster_id | length > 0
+      - ocp_cluster_id | regex_search('^[a-f0-9-]+$')
+    fail_msg: "Invalid cluster ID format: {{ ocp_cluster_id }}"
+
+- name: Set cluster discovery completion flag
+  set_fact:
+    cluster_discovery_completed: true
+    cluster_discovery_timestamp: "{{ ansible_date_time.iso8601 }}" 

@@ -1,0 +1,36 @@
+# OpenShift CCO Credential Rotation Requirements
+# This file documents the required CLI tools and their minimum versions
+
+# Core Requirements:
+# - Ansible 2.9+ (for playbook execution)
+# - OpenShift CLI (oc) 4.10+ (for cluster interaction)
+# - AWS CLI 2.0+ (for AWS operations)
+# - jq 1.6+ (for JSON processing)
+
+# Installation commands:
+
+# macOS (using Homebrew):
+# brew install ansible awscli jq
+# brew install openshift-cli
+
+# RHEL/CentOS/Fedora:
+# dnf install ansible awscli jq
+# # For OC CLI, download from: https://mirror.openshift.com/pub/openshift-v4/clients/ocp/
+
+# Ubuntu/Debian:
+# apt-get install ansible awscli jq
+# # For OC CLI, download from: https://mirror.openshift.com/pub/openshift-v4/clients/ocp/
+
+# Python packages (if using pip for Ansible):
+# pip install ansible>=2.9
+# pip install awscli>=2.0
+
+# Verification commands:
+# ansible --version
+# oc version --client
+# aws --version
+# jq --version
+
+# Note: This project requires the CLI tools to be installed and configured
+# on the Ansible control node. The playbook will verify their presence
+# during the preflight checks. 

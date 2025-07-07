@@ -1,0 +1,96 @@
+---
+# Main variables for CCO credential rotation
+# Non-sensitive configuration variables
+
+# CLI tool requirements
+required_cli_tools:
+  - name: "oc"
+    version_command: "oc version --client -o json"
+    min_version: "4.10.0"
+  - name: "aws"
+    version_command: "aws --version"
+    min_version: "2.0.0"
+  - name: "jq"
+    version_command: "jq --version"
+    min_version: "1.6"
+
+# CCO IAM policy requirements
+cco_required_policies:
+  - policy_name: "OpenShiftCloudCredentialOperatorPolicy"
+    policy_document:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: "Allow"
+          Action:
+            - "iam:CreateAccessKey"
+            - "iam:CreateUser"
+            - "iam:DeleteAccessKey"
+            - "iam:DeleteUser"
+            - "iam:DeleteUserPolicy"
+            - "iam:GetUser"
+            - "iam:GetUserPolicy"
+            - "iam:ListAccessKeys"
+            - "iam:PutUserPolicy"
+            - "iam:TagUser"
+            - "iam:SimulatePrincipalPolicy"
+          Resource: "*"
+        - Effect: "Allow"
+          Action:
+            - "iam:GetRole"
+            - "iam:ListRoles"
+            - "iam:PassRole"
+          Resource: "*"
+          Condition:
+            StringEquals:
+              "iam:PassedToService": "ec2.amazonaws.com"
+
+# Component credential rotation settings
+component_rotation_config:
+  # Wait time between credential deletions to allow CCO to recreate them
+  recreation_wait_time: 60
+  
+  # Maximum wait time for credential recreation
+  max_recreation_wait: 300
+  
+  # Namespaces to check for CredentialsRequest objects
+  credentials_request_namespaces:
+    - "openshift-cloud-credential-operator"
+    - "openshift-image-registry"
+    - "openshift-ingress-operator"
+    - "openshift-cluster-csi-drivers"
+    - "openshift-machine-api"
+
+# Verification settings
+verification_config:
+  # Cluster operators to check for health
+  critical_operators:
+    - "cloud-credential"
+    - "image-registry"
+    - "ingress"
+    - "machine-api"
+    - "storage"
+  
+  # Health check timeout
+  health_check_timeout: 300
+  
+  # Retry intervals
+  retry_delay: 30
+  max_retries: 10
+
+# Logging and audit settings
+logging_config:
+  log_level: "INFO"
+  rotation_log_retention_days: 90
+  audit_log_path: "logs/audit"
+  
+# Safety settings
+safety_config:
+  # Require confirmation for key deletion
+  require_confirmation: true
+  
+  # Dry run mode (set to true for testing)
+  dry_run_default: false
+  
+  # Backup settings
+  backup_old_credentials: true
+  backup_retention_days: 30 

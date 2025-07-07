@@ -1,0 +1,107 @@
+---
+# Rotate CCO IAM User Access Key
+# Creates a new access key for the CCO IAM user and removes old keys
+
+- name: List existing access keys for CCO IAM user
+  command: aws iam list-access-keys --user-name "{{ cco_iam_user_name }}"
+  register: existing_access_keys
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Parse existing access keys
+  set_fact:
+    current_access_keys: "{{ existing_access_keys.stdout | from_json }}"
+
+- name: Display current access keys
+  debug:
+    msg: "Found {{ current_access_keys.AccessKeyMetadata | length }} existing access keys for user {{ cco_iam_user_name }}"
+
+- name: Backup current access key information
+  copy:
+    content: |
+      ---
+      backup_timestamp: "{{ ansible_date_time.iso8601 }}"
+      cluster_id: "{{ ocp_cluster_id }}"
+      iam_user: "{{ cco_iam_user_name }}"
+      existing_access_keys: {{ current_access_keys.AccessKeyMetadata | to_nice_yaml }}
+    dest: "backups/access_keys_backup_{{ ansible_date_time.date }}_{{ ansible_date_time.time.replace(':', '-') }}.yml"
+    mode: '0600'
+  when: safety_config.backup_old_credentials
+
+- name: Deactivate existing access keys (if any)
+  command: |
+    aws iam update-access-key 
+    --user-name "{{ cco_iam_user_name }}"
+    --access-key-id "{{ item.AccessKeyId }}"
+    --status Inactive
+  loop: "{{ current_access_keys.AccessKeyMetadata }}"
+  when: current_access_keys.AccessKeyMetadata | length > 0
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Wait before deleting old access keys
+  pause:
+    seconds: 10
+  when: current_access_keys.AccessKeyMetadata | length > 0
+
+- name: Delete existing access keys
+  command: |
+    aws iam delete-access-key 
+    --user-name "{{ cco_iam_user_name }}"
+    --access-key-id "{{ item.AccessKeyId }}"
+  loop: "{{ current_access_keys.AccessKeyMetadata }}"
+  when: current_access_keys.AccessKeyMetadata | length > 0
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Create new access key for CCO IAM user
+  command: aws iam create-access-key --user-name "{{ cco_iam_user_name }}"
+  register: new_access_key_result
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Parse new access key information
+  set_fact:
+    new_access_key: "{{ new_access_key_result.stdout | from_json }}"
+
+- name: Set new access key variables
+  set_fact:
+    new_access_key_id: "{{ new_access_key.AccessKey.AccessKeyId }}"
+    new_secret_access_key: "{{ new_access_key.AccessKey.SecretAccessKey }}"
+
+- name: Display new access key information (ID only)
+  debug:
+    msg: "Created new access key: {{ new_access_key_id }}"
+
+- name: Test new access key functionality
+  command: aws sts get-caller-identity
+  register: new_key_test
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ new_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ new_secret_access_key }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Verify new access key is functional
+  assert:
+    that:
+      - new_key_test.rc == 0
+      - (new_key_test.stdout | from_json).Account == aws_caller_identity.Account
+    fail_msg: "New access key is not functional"
+
+- name: Set key rotation completion flag
+  set_fact:
+    key_rotation_completed: true
+    key_rotation_timestamp: "{{ ansible_date_time.iso8601 }}"
+    old_access_keys_count: "{{ current_access_keys.AccessKeyMetadata | length }}" 

@@ -1,0 +1,122 @@
+---
+# Pre-flight checks for CCO credential rotation
+# Verifies that all required CLI tools are available and properly configured
+
+- name: Check if required CLI tools are installed
+  command: "which {{ item.name }}"
+  register: cli_tool_check
+  failed_when: cli_tool_check.rc != 0
+  loop: "{{ required_cli_tools }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Get CLI tool versions
+  shell: "{{ item.version_command }}"
+  register: cli_tool_versions
+  loop: "{{ required_cli_tools }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Display CLI tool versions
+  debug:
+    msg: "{{ item.item.name }}: {{ item.stdout }}"
+  loop: "{{ cli_tool_versions.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Check OpenShift cluster connectivity
+  command: oc cluster-info
+  register: cluster_info
+  failed_when: cluster_info.rc != 0
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Verify OpenShift admin privileges
+  command: oc auth can-i "*" "*" --as=system:admin
+  register: admin_check
+  failed_when: admin_check.rc != 0 or admin_check.stdout.strip() != "yes"
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Check AWS CLI configuration
+  command: aws sts get-caller-identity
+  register: aws_identity
+  failed_when: aws_identity.rc != 0
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Parse AWS caller identity
+  set_fact:
+    aws_caller_identity: "{{ aws_identity.stdout | from_json }}"
+
+- name: Display AWS caller identity
+  debug:
+    msg:
+      - "AWS Account ID: {{ aws_caller_identity.Account }}"
+      - "AWS User ARN: {{ aws_caller_identity.Arn }}"
+      - "AWS User ID: {{ aws_caller_identity.UserId }}"
+
+- name: Verify AWS IAM permissions for CCO operations
+  command: |
+    aws iam simulate-principal-policy 
+    --policy-source-arn "{{ aws_caller_identity.Arn }}"
+    --action-names {{ cco_required_policies[0].policy_document.Statement[0].Action | join(' ') }}
+    --resource-arns "*"
+  register: iam_permissions_check
+  failed_when: iam_permissions_check.rc != 0
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Check if CCO is in mint mode
+  command: |
+    oc get secret {{ ocp_cco_rotation_config.cco_secret_name }} 
+    -n {{ ocp_cco_rotation_config.cco_secret_namespace }} 
+    -o jsonpath='{.data.aws_access_key_id}'
+  register: current_cco_secret
+  failed_when: current_cco_secret.rc != 0
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Verify CCO secret exists and is not empty
+  assert:
+    that:
+      - current_cco_secret.stdout | length > 0
+    fail_msg: "CCO aws-creds secret is empty or missing"
+
+- name: Check cluster operators status
+  command: oc get clusteroperators -o json
+  register: cluster_operators_status
+  environment:
+    KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
+
+- name: Parse cluster operators status
+  set_fact:
+    cluster_operators: "{{ cluster_operators_status.stdout | from_json }}"
+
+- name: Verify critical operators are available
+  assert:
+    that:
+      - cluster_operators.items | selectattr('metadata.name', 'equalto', item) | list | length > 0
+    fail_msg: "Critical operator {{ item }} not found"
+  loop: "{{ verification_config.critical_operators }}"
+
+- name: Create required directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "logs"
+    - "logs/audit"
+    - "backups"
+
+- name: Set preflight check completion flag
+  set_fact:
+    preflight_checks_completed: true
+    preflight_timestamp: "{{ ansible_date_time.iso8601 }}" 

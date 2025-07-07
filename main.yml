@@ -1,0 +1,90 @@
+---
+- name: OpenShift Cloud Credential Operator (CCO) AWS Credential Rotation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+    - vars/vault.yml  # Contains sensitive variables, should be encrypted with ansible-vault
+  
+  pre_tasks:
+    - name: Display playbook information
+      debug:
+        msg:
+          - "OpenShift CCO AWS Credential Rotation Playbook"
+          - "Cluster: {{ ocp_cluster_name | default('undefined') }}"
+          - "AWS Region: {{ ocp_cco_rotation_config.aws_region }}"
+          - "AWS Profile: {{ ocp_cco_rotation_config.aws_profile }}"
+          - "Dry Run: {{ dry_run | default(false) }}"
+          - "Timestamp: {{ ansible_date_time.iso8601 }}"
+      tags: ['always']
+
+  tasks:
+    # Step 1: Pre-flight checks
+    - name: "Step 1: Perform pre-flight checks"
+      include_tasks: tasks/01_preflight_checks.yml
+      tags: ['preflight', 'checks']
+
+    # Step 2: Get OpenShift cluster ID
+    - name: "Step 2: Get OpenShift cluster ID"
+      include_tasks: tasks/02_get_ocp_cluster_id.yml
+      tags: ['cluster-id', 'discovery']
+
+    # Step 3: Manage CCO IAM user and policy in AWS
+    - name: "Step 3: Manage CCO IAM user and policy"
+      include_role:
+        name: aws_iam_user_management
+      vars:
+        iam_user_name: "{{ ocp_cco_rotation_config.iam_user_prefix }}-{{ ocp_cluster_id }}"
+        iam_user_policies: "{{ cco_required_policies }}"
+      tags: ['iam-user', 'aws-setup']
+
+    # Step 4: Clean up old/orphaned AWS access keys (moved before rotation)
+    - name: "Step 4: Clean up old/orphaned AWS access keys"
+      include_tasks: tasks/04_cleanup_old_keys.yml
+      tags: ['cleanup', 'security']
+
+    # Step 5: Create/rotate CCO IAM user access key
+    - name: "Step 5: Create/rotate CCO IAM user access key"
+      include_tasks: tasks/05_rotate_iam_access_key.yml
+      tags: ['rotate-key', 'aws-credentials']
+
+    # Step 6: Update CCO root secret in OpenShift
+    - name: "Step 6: Update CCO root secret in OpenShift"
+      include_tasks: tasks/06_update_cco_root_secret.yml
+      tags: ['update-secret', 'openshift']
+
+    # Step 7: Rotate CCO-managed component credentials
+    - name: "Step 7: Rotate CCO-managed component credentials"
+      include_tasks: tasks/07_rotate_component_credentials.yml
+      tags: ['rotate-components', 'openshift']
+
+    # Step 8: Post-rotation verification
+    - name: "Step 8: Post-rotation verification"
+      include_tasks: tasks/08_post_rotation_verification.yml
+      tags: ['verify', 'health-check']
+
+  post_tasks:
+    - name: Display rotation completion summary
+      debug:
+        msg:
+          - "CCO credential rotation completed successfully"
+          - "New IAM user: {{ cco_iam_user_name }}"
+          - "New access key created: {{ ansible_date_time.iso8601 }}"
+          - "Components rotated: {{ rotated_components | default([]) | length }}"
+          - "Verification status: {{ verification_status | default('unknown') }}"
+      tags: ['always']
+
+    - name: Save rotation metadata
+      copy:
+        content: |
+          ---
+          rotation_timestamp: "{{ ansible_date_time.iso8601 }}"
+          cluster_id: "{{ ocp_cluster_id }}"
+          iam_user: "{{ cco_iam_user_name }}"
+          access_key_id: "{{ new_access_key_id }}"
+          components_rotated: {{ rotated_components | default([]) | to_nice_yaml }}
+          verification_status: "{{ verification_status | default('unknown') }}"
+        dest: "logs/rotation_{{ ansible_date_time.date }}_{{ ansible_date_time.time.replace(':', '-') }}.yml"
+        mode: '0600'
+      tags: ['always'] 

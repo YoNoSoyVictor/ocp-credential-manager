@@ -1,0 +1,106 @@
+---
+# Clean up old/orphaned AWS access keys
+# This step runs before key rotation to prevent conflicts
+
+- name: List all users in AWS account with CCO prefix
+  command: |
+    aws iam list-users --query 'Users[?starts_with(UserName, `{{ ocp_cco_rotation_config.iam_user_prefix }}`)].UserName' --output text
+  register: cco_users_list
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Parse CCO users list
+  set_fact:
+    cco_users: "{{ cco_users_list.stdout.split() if cco_users_list.stdout else [] }}"
+
+- name: Display found CCO users
+  debug:
+    msg: "Found {{ cco_users | length }} CCO users: {{ cco_users }}"
+
+- name: Get access keys for each CCO user
+  command: aws iam list-access-keys --user-name "{{ item }}"
+  register: user_access_keys
+  loop: "{{ cco_users }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Build comprehensive access key inventory
+  set_fact:
+    all_access_keys: "{{ all_access_keys | default([]) + [(item.item, (item.stdout | from_json).AccessKeyMetadata)] }}"
+  loop: "{{ user_access_keys.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Display access key inventory
+  debug:
+    msg: "User {{ item.0 }} has {{ item.1 | length }} access keys"
+  loop: "{{ all_access_keys }}"
+
+- name: Identify orphaned users (not matching current cluster)
+  set_fact:
+    orphaned_users: "{{ cco_users | difference([cco_iam_user_name]) }}"
+
+- name: Display orphaned users
+  debug:
+    msg: "Found {{ orphaned_users | length }} orphaned CCO users: {{ orphaned_users }}"
+
+- name: Get creation date for orphaned access keys
+  command: aws iam list-access-keys --user-name "{{ item }}" --query 'AccessKeyMetadata[*].[AccessKeyId,CreateDate]' --output text
+  register: orphaned_keys_info
+  loop: "{{ orphaned_users }}"
+  when: orphaned_users | length > 0
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Create backup of orphaned keys before deletion
+  copy:
+    content: |
+      ---
+      cleanup_timestamp: "{{ ansible_date_time.iso8601 }}"
+      cluster_id: "{{ ocp_cluster_id }}"
+      orphaned_users: {{ orphaned_users | to_nice_yaml }}
+      orphaned_keys_info: {{ orphaned_keys_info.results | to_nice_yaml }}
+    dest: "backups/orphaned_keys_cleanup_{{ ansible_date_time.date }}_{{ ansible_date_time.time.replace(':', '-') }}.yml"
+    mode: '0600'
+  when: orphaned_users | length > 0 and safety_config.backup_old_credentials
+
+- name: Delete access keys for orphaned users
+  command: |
+    aws iam delete-access-key 
+    --user-name "{{ item.0 }}"
+    --access-key-id "{{ item.1.AccessKeyId }}"
+  loop: "{{ all_access_keys }}"
+  when: item.0 in orphaned_users
+  loop_control:
+    label: "{{ item.0 }}: {{ item.1.AccessKeyId }}"
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Delete orphaned IAM users
+  command: aws iam delete-user --user-name "{{ item }}"
+  loop: "{{ orphaned_users }}"
+  when: orphaned_users | length > 0
+  failed_when: false  # Continue even if user has attached policies
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
+    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
+    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+- name: Set cleanup completion flag
+  set_fact:
+    cleanup_completed: true
+    cleanup_timestamp: "{{ ansible_date_time.iso8601 }}"
+    orphaned_users_cleaned: "{{ orphaned_users | length }}" 

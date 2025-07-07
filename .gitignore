@@ -1,0 +1,82 @@
+# Sensitive files
+vars/vault.yml
+*.vault
+
+# Log files
+logs/
+*.log
+
+# Backup files
+backups/
+*.backup
+
+# Temporary files
+*.tmp
+*.temp
+.ansible_tmp/
+
+# Ansible retry files
+*.retry
+
+# SSH keys
+*.pem
+*.key
+id_rsa*
+
+# AWS credentials
+.aws/credentials
+.aws/config
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Collections
+collections/
+
+# Vault password files
+.vault_pass
+vault_pass*
+
+# Terraform (if used)
+*.tfstate
+*.tfstate.backup
+.terraform/
+terraform.tfvars
+
+# Local test files
+test_*.yml
+test_*.yaml
+
+# Generated certificates
+*.crt
+*.csr
+*.p12
+*.pfx 
