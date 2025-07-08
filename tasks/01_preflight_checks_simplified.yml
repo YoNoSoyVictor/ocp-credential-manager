@@ -1,0 +1,44 @@
+---
+# Simplified Pre-flight checks using command templates
+# This shows how much cleaner the new approach is
+
+- name: Check if required CLI tools are installed
+  command: "which {{ item.name }}"
+  register: cli_tool_check
+  failed_when: cli_tool_check.rc != 0
+  loop: "{{ required_cli_tools }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check OpenShift cluster connectivity
+  command: "{{ oc_commands.cluster_info }}"
+  register: cluster_info
+  failed_when: cluster_info.rc != 0
+
+- name: Verify OpenShift admin privileges
+  command: "{{ oc_commands.auth_can_i }} \"*\" \"*\" --as=system:admin"
+  register: admin_check
+  failed_when: admin_check.rc != 0 or admin_check.stdout.strip() != "yes"
+
+- name: Check AWS CLI configuration
+  command: "{{ aws_commands.get_caller_identity }}"
+  register: aws_identity
+  failed_when: aws_identity.rc != 0
+  environment: "{{ aws_env_vars }}"
+
+- name: Parse AWS caller identity
+  set_fact:
+    aws_caller_identity: "{{ aws_identity.stdout | from_json }}"
+
+- name: Check if CCO is in mint mode
+  command: "{{ oc_commands.get_secret }} {{ ocp_cco_rotation_config.cco_secret_name }} -n {{ ocp_cco_rotation_config.cco_secret_namespace }} -o jsonpath='{.data.aws_access_key_id}'"
+  register: current_cco_secret
+  failed_when: current_cco_secret.rc != 0
+
+- name: Check cluster operators status
+  command: "{{ oc_commands.get_clusteroperators }} -o json"
+  register: cluster_operators_status
+
+- name: Display success
+  debug:
+    msg: "All preflight checks passed! Ready to rotate CCO credentials." 

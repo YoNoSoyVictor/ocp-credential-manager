@@ -2,15 +2,14 @@
 # Clean up old/orphaned AWS access keys
 # This step runs before key rotation to prevent conflicts
 
+- name: Load command templates
+  include_vars: "{{ playbook_dir }}/templates/command_templates.yml"
+
 - name: List all users in AWS account with CCO prefix
   command: |
-    aws iam list-users --query 'Users[?starts_with(UserName, `{{ ocp_cco_rotation_config.iam_user_prefix }}`)].UserName' --output text
+    {{ aws_cmd_prefix }} iam list-users --query 'Users[?starts_with(UserName, `{{ ocp_cco_rotation_config.iam_user_prefix }}`)].UserName' --output text
   register: cco_users_list
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Parse CCO users list
   set_fact:
@@ -21,14 +20,10 @@
     msg: "Found {{ cco_users | length }} CCO users: {{ cco_users }}"
 
 - name: Get access keys for each CCO user
-  command: aws iam list-access-keys --user-name "{{ item }}"
+  command: "{{ aws_cmd_prefix }} iam list-access-keys --user-name {{ item }}"
   register: user_access_keys
   loop: "{{ cco_users }}"
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Build comprehensive access key inventory
   set_fact:
@@ -51,15 +46,11 @@
     msg: "Found {{ orphaned_users | length }} orphaned CCO users: {{ orphaned_users }}"
 
 - name: Get creation date for orphaned access keys
-  command: aws iam list-access-keys --user-name "{{ item }}" --query 'AccessKeyMetadata[*].[AccessKeyId,CreateDate]' --output text
+  command: "{{ aws_cmd_prefix }} iam list-access-keys --user-name {{ item }} --query 'AccessKeyMetadata[*].[AccessKeyId,CreateDate]' --output text"
   register: orphaned_keys_info
   loop: "{{ orphaned_users }}"
   when: orphaned_users | length > 0
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Create backup of orphaned keys before deletion
   copy:
@@ -74,30 +65,19 @@
   when: orphaned_users | length > 0 and safety_config.backup_old_credentials
 
 - name: Delete access keys for orphaned users
-  command: |
-    aws iam delete-access-key 
-    --user-name "{{ item.0 }}"
-    --access-key-id "{{ item.1.AccessKeyId }}"
+  include_tasks: delete_user_access_keys.yml
   loop: "{{ all_access_keys }}"
-  when: item.0 in orphaned_users
   loop_control:
-    label: "{{ item.0 }}: {{ item.1.AccessKeyId }}"
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+    loop_var: user_access_keys
+    label: "{{ user_access_keys.0 }}"
+  when: user_access_keys.0 in orphaned_users and user_access_keys.1 | length > 0
 
 - name: Delete orphaned IAM users
-  command: aws iam delete-user --user-name "{{ item }}"
+  command: "{{ aws_cmd_prefix }} iam delete-user --user-name {{ item }}"
   loop: "{{ orphaned_users }}"
   when: orphaned_users | length > 0
   failed_when: false  # Continue even if user has attached policies
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Set cleanup completion flag
   set_fact:

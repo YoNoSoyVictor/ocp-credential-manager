@@ -20,7 +20,7 @@
   set_fact:
     operator_health_status: "{{ operator_health_status | default({}) | combine({item: operator_conditions}) }}"
   vars:
-    operator_data: "{{ post_rotation_co_status.items | selectattr('metadata.name', 'equalto', item) | first }}"
+    operator_data: "{{ post_rotation_co_status['items'] | selectattr('metadata.name', 'equalto', item) | first }}"
     operator_conditions: "{{ operator_data.status.conditions | items2dict(key_name='type', value_name='status') }}"
   loop: "{{ verification_config.critical_operators }}"
 
@@ -38,9 +38,7 @@
   loop: "{{ verification_config.critical_operators }}"
 
 - name: Check CCO operator logs for any errors
-  command: |
-    oc logs -n {{ ocp_cco_rotation_config.cco_namespace }} 
-    deployment/cloud-credential-operator --tail=50
+  command: "oc logs -n {{ ocp_cco_rotation_config.cco_namespace }} deployment/cloud-credential-operator --tail=50"
   register: cco_logs
   environment:
     KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
@@ -60,8 +58,7 @@
   when: cco_has_errors
 
 - name: Verify CCO managed secrets are functional
-  command: |
-    oc get secret {{ item.name }} -n {{ item.namespace }} -o jsonpath='{.data.aws_access_key_id}' | base64 -d
+  shell: "oc get secret {{ item.name }} -n {{ item.namespace }} -o jsonpath='{.data.aws_access_key_id}' | base64 -d"
   register: verify_component_keys
   loop: "{{ component_secrets }}"
   loop_control:
@@ -88,22 +85,22 @@
   set_fact:
     nodes_info: "{{ nodes_status.stdout | from_json }}"
 
+- name: Check node readiness
+  set_fact:
+    ready_nodes: "{{ ready_nodes | default([]) + [item.metadata.name] }}"
+  loop: "{{ nodes_info['items'] }}"
+  when: 
+    - item.status.conditions is defined
+    - item.status.conditions | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length > 0
+
 - name: Verify all nodes are ready
   assert:
     that:
-      - nodes_info.items | selectattr('status.conditions', 'defined') | map(attribute='status.conditions') | 
-        map('selectattr', 'type', 'equalto', 'Ready') | 
-        map('selectattr', 'status', 'equalto', 'True') | 
-        map('list') | 
-        select('length') | 
-        list | length == nodes_info.items | length
-    fail_msg: "Not all nodes are in Ready state"
+      - ready_nodes | default([]) | length == nodes_info['items'] | length
+    fail_msg: "Not all nodes are in Ready state. Ready: {{ ready_nodes | default([]) | length }}, Total: {{ nodes_info['items'] | length }}"
 
 - name: Check for any failing pods in critical namespaces
-  command: |
-    oc get pods --all-namespaces 
-    --field-selector=status.phase!=Running,status.phase!=Succeeded
-    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.phase}{"\n"}{end}'
+  command: "oc get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded -o jsonpath='{range .items[*]}{.metadata.namespace}{\" \"}{.metadata.name}{\" \"}{.status.phase}{\"\\n\"}{end}'"
   register: failing_pods
   environment:
     KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
@@ -128,24 +125,18 @@
     that:
       - item.status.readyReplicas | default(0) == item.status.replicas | default(0)
     fail_msg: "MachineSet {{ item.metadata.name }} is not healthy: {{ item.status.readyReplicas | default(0) }}/{{ item.status.replicas | default(0) }} ready"
-  loop: "{{ machinesets_info.items }}"
+  loop: "{{ machinesets_info['items'] }}"
   loop_control:
     label: "{{ item.metadata.name }}"
 
 - name: Test AWS access with new CCO credentials
-  command: |
-    oc get secret {{ ocp_cco_rotation_config.cco_secret_name }} 
-    -n {{ ocp_cco_rotation_config.cco_secret_namespace }} 
-    -o jsonpath='{.data.aws_access_key_id}' | base64 -d
+  shell: "oc get secret {{ ocp_cco_rotation_config.cco_secret_name }} -n {{ ocp_cco_rotation_config.cco_secret_namespace }} -o jsonpath='{.data.aws_access_key_id}' | base64 -d"
   register: test_new_cco_key
   environment:
     KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
 
 - name: Get new CCO secret key
-  command: |
-    oc get secret {{ ocp_cco_rotation_config.cco_secret_name }} 
-    -n {{ ocp_cco_rotation_config.cco_secret_namespace }} 
-    -o jsonpath='{.data.aws_secret_access_key}' | base64 -d
+  shell: "oc get secret {{ ocp_cco_rotation_config.cco_secret_name }} -n {{ ocp_cco_rotation_config.cco_secret_namespace }} -o jsonpath='{.data.aws_secret_access_key}' | base64 -d"
   register: test_new_cco_secret
   environment:
     KUBECONFIG: "{{ ocp_cco_rotation_config.kubeconfig_path }}"
@@ -165,6 +156,10 @@
       - (cco_credentials_test.stdout | from_json).Account == aws_caller_identity.Account
     fail_msg: "New CCO credentials are not functional"
 
+- name: Count failing pods
+  set_fact:
+    failing_pods_list: "{{ failing_pods.stdout.split('\n') | select('match', '.+') | list }}"
+
 - name: Generate verification report
   set_fact:
     verification_report:
@@ -172,11 +167,11 @@
       cluster_id: "{{ ocp_cluster_id }}"
       rotation_successful: true
       critical_operators_healthy: "{{ verification_config.critical_operators | length }}"
-      components_rotated: "{{ rotated_components | length }}"
-      nodes_ready: "{{ nodes_info.items | length }}"
-      cco_errors_detected: "{{ cco_has_errors }}"
-      new_access_key_id: "{{ new_access_key_id }}"
-      failing_pods_count: "{{ failing_pods.stdout.split('\n') | select('length') | list | length }}"
+      components_rotated: "{{ rotated_components | default([]) | length }}"
+      nodes_ready: "{{ nodes_info['items'] | length }}"
+      cco_errors_detected: "{{ cco_has_errors | default(false) }}"
+      new_access_key_id: "{{ new_access_key_id | default('N/A') }}"
+      failing_pods_count: "{{ failing_pods_list | length }}"
 
 - name: Display verification summary
   debug:

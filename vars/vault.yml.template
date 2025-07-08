@@ -3,21 +3,6 @@
 # This file should be encrypted with ansible-vault encrypt vars/vault.yml
 # Copy this template to vars/vault.yml and fill in the actual values
 
-# AWS credentials for the rotation process
-# These should be for a user with sufficient permissions to manage IAM users and policies
-vault_aws_access_key_id: "YOUR_AWS_ACCESS_KEY_ID"
-vault_aws_secret_access_key: "YOUR_AWS_SECRET_ACCESS_KEY"
-
-# Optional: AWS session token if using temporary credentials
-vault_aws_session_token: ""
-
-# OpenShift cluster information
-vault_ocp_cluster_name: "YOUR_CLUSTER_NAME"
-vault_ocp_cluster_domain: "YOUR_CLUSTER_DOMAIN"
-
-# Optional: If using a specific kubeconfig
-vault_kubeconfig_path: "{{ ansible_env.HOME }}/.kube/config"
-
 # Optional: Notification settings (for alerts/monitoring)
 vault_notification_config:
   slack_webhook: ""
@@ -30,5 +15,10 @@ vault_backup_config:
   s3_region: ""
   s3_prefix: "ocp-cco-backups"
 
-# Optional: Additional AWS account information
-vault_aws_account_id: "YOUR_AWS_ACCOUNT_ID" 
+# Note: This template is now much simpler!
+# 
+# For AWS access: Use AWS profiles via --extra-vars "aws_profile=myprofile"
+# For OpenShift access: Use kubeconfig via --extra-vars "kubeconfig_path=/path/to/config"
+# 
+# No sensitive AWS credentials or cluster information needed in this file!
+# Everything is auto-discovered or passed via command line. 

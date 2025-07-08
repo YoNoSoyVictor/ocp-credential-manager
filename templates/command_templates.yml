@@ -1,0 +1,46 @@
+---
+# Command Templates for CCO Rotation
+# This file defines reusable command prefixes for AWS and OC commands
+
+# AWS command prefix with optional profile
+aws_cmd_prefix: "aws {{ '--profile ' + aws_profile if aws_profile is defined else '' }}"
+
+# OC command prefix with optional kubeconfig
+oc_cmd_prefix: "oc {{ '--kubeconfig ' + kubeconfig_path if kubeconfig_path is defined else '' }}"
+
+# AWS environment variables (minimal)
+aws_env_vars:
+  AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+
+# Common AWS command templates
+aws_commands:
+  get_caller_identity: "{{ aws_cmd_prefix }} sts get-caller-identity"
+  get_user: "{{ aws_cmd_prefix }} iam get-user --user-name"
+  create_user: "{{ aws_cmd_prefix }} iam create-user --user-name"
+  delete_user: "{{ aws_cmd_prefix }} iam delete-user --user-name"
+  list_access_keys: "{{ aws_cmd_prefix }} iam list-access-keys --user-name"
+  create_access_key: "{{ aws_cmd_prefix }} iam create-access-key --user-name"
+  delete_access_key: "{{ aws_cmd_prefix }} iam delete-access-key --user-name"
+  update_access_key: "{{ aws_cmd_prefix }} iam update-access-key --user-name"
+  put_user_policy: "{{ aws_cmd_prefix }} iam put-user-policy --user-name"
+  get_user_policy: "{{ aws_cmd_prefix }} iam get-user-policy --user-name"
+  list_user_policies: "{{ aws_cmd_prefix }} iam list-user-policies --user-name"
+  delete_user_policy: "{{ aws_cmd_prefix }} iam delete-user-policy --user-name"
+  simulate_principal_policy: "{{ aws_cmd_prefix }} iam simulate-principal-policy"
+
+# Common OC command templates
+oc_commands:
+  cluster_info: "{{ oc_cmd_prefix }} cluster-info"
+  auth_can_i: "{{ oc_cmd_prefix }} auth can-i"
+  get_secret: "{{ oc_cmd_prefix }} get secret"
+  patch_secret: "{{ oc_cmd_prefix }} patch secret"
+  annotate_secret: "{{ oc_cmd_prefix }} annotate secret"
+  delete_secret: "{{ oc_cmd_prefix }} delete secret"
+  get_clusteroperators: "{{ oc_cmd_prefix }} get clusteroperators"
+  get_credentialsrequest: "{{ oc_cmd_prefix }} get credentialsrequest"
+  get_infrastructure: "{{ oc_cmd_prefix }} get infrastructure"
+  get_clusterversion: "{{ oc_cmd_prefix }} get clusterversion"
+  get_nodes: "{{ oc_cmd_prefix }} get nodes"
+  get_pods: "{{ oc_cmd_prefix }} get pods"
+  get_machinesets: "{{ oc_cmd_prefix }} get machinesets"
+  logs: "{{ oc_cmd_prefix }} logs" 

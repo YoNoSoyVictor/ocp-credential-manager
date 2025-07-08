@@ -42,22 +42,26 @@ ocp-credential-manager/
 
 ## Setup Instructions
 
-### 1. Configure Variables
+### 1. Configure AWS and OpenShift Access
 
-Copy the vault template and configure your sensitive variables:
-
+**AWS Access**: Configure your AWS credentials using standard AWS CLI profiles:
 ```bash
-cp vars/vault.yml.template vars/vault.yml
+aws configure --profile myprofile
+# or use existing AWS credentials in ~/.aws/credentials
 ```
 
-Edit `vars/vault.yml` with your actual values:
-- AWS credentials for the rotation process
-- OpenShift cluster information
-- Optional notification and backup settings
-
-### 2. Encrypt Sensitive Variables
-
+**OpenShift Access**: Ensure your kubeconfig is configured:
 ```bash
+oc login https://your-cluster-api-url:6443
+# or use existing kubeconfig file
+```
+
+### 2. Optional: Configure Notifications (Optional)
+
+Only if you want notifications or custom backup settings:
+```bash
+cp vars/vault.yml.template vars/vault.yml
+# Edit vars/vault.yml with notification settings
 ansible-vault encrypt vars/vault.yml
 ```
 
@@ -93,32 +97,42 @@ The AWS credentials used for rotation must have the following IAM permissions:
 }
 ```
 
+## Quick Start Guide
+
+**That's it!** You just need:
+
+1. **AWS Profile configured**: `aws configure --profile myprofile`
+2. **OpenShift access**: `oc login https://your-cluster-api-url:6443`
+3. **Run the rotation**: `ansible-playbook main.yml -e "aws_profile=myprofile"`
+
+No vault files, no manual credential entry, no complex setup required!
+
 ## Usage
 
 ### Basic Rotation
 
 ```bash
-# Run the full rotation process
-ansible-playbook main.yml --ask-vault-pass
+# Run the full rotation process (uses default AWS profile and kubeconfig)
+ansible-playbook main.yml
 
-# Run with specific tags
-ansible-playbook main.yml --ask-vault-pass --tags "preflight,cluster-id"
+# Use specific AWS profile and kubeconfig
+ansible-playbook main.yml -e "aws_profile=myprofile" -e "kubeconfig_path=/path/to/kubeconfig"
 
 # Dry run mode (testing)
-ansible-playbook main.yml --ask-vault-pass -e "dry_run=true"
+ansible-playbook main.yml -e "dry_run=true"
 ```
 
 ### Advanced Usage
 
 ```bash
+# Run with specific tags
+ansible-playbook main.yml --tags "preflight,cluster-id"
+
 # Skip certain steps
-ansible-playbook main.yml --ask-vault-pass --skip-tags "cleanup"
+ansible-playbook main.yml --skip-tags "cleanup"
 
-# Use specific AWS profile
+# Use vault file (if you have notifications configured)
 ansible-playbook main.yml --ask-vault-pass -e "aws_profile=myprofile"
-
-# Use specific kubeconfig
-ansible-playbook main.yml --ask-vault-pass -e "kubeconfig_path=/path/to/kubeconfig"
 ```
 
 ## How the Rotation Process Works

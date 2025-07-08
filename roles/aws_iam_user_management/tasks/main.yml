@@ -2,40 +2,31 @@
 # AWS IAM User Management Role
 # Manages the creation and configuration of the CCO IAM user
 
+- name: Load command templates
+  include_vars: "{{ playbook_dir }}/templates/command_templates.yml"
+
 - name: Check if CCO IAM user already exists
-  command: aws iam get-user --user-name "{{ iam_user_name }}"
+  command: "{{ aws_cmd_prefix }} iam get-user --user-name {{ iam_user_name }}"
   register: existing_user_check
   failed_when: false
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Create CCO IAM user if it doesn't exist
   command: |
-    aws iam create-user 
+    {{ aws_cmd_prefix }} iam create-user 
     --user-name "{{ iam_user_name }}"
     --tags Key=Purpose,Value=OpenShiftCCO Key=Cluster,Value="{{ ocp_cluster_id }}" Key=ManagedBy,Value=Ansible
   when: existing_user_check.rc != 0
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Display user creation result
   debug:
     msg: "{{ 'Created new IAM user' if existing_user_check.rc != 0 else 'IAM user already exists' }}: {{ iam_user_name }}"
 
 - name: Get current user policies
-  command: aws iam list-user-policies --user-name "{{ iam_user_name }}"
+  command: "{{ aws_cmd_prefix }} iam list-user-policies --user-name {{ iam_user_name }}"
   register: current_user_policies
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Parse current user policies
   set_fact:
@@ -43,50 +34,41 @@
 
 - name: Create or update CCO IAM policy
   command: |
-    aws iam put-user-policy 
+    {{ aws_cmd_prefix }} iam put-user-policy 
     --user-name "{{ iam_user_name }}"
     --policy-name "{{ item.policy_name }}"
     --policy-document '{{ item.policy_document | to_json }}'
   loop: "{{ iam_user_policies }}"
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Verify IAM policy was applied
-  command: aws iam get-user-policy --user-name "{{ iam_user_name }}" --policy-name "{{ item.policy_name }}"
+  command: "{{ aws_cmd_prefix }} iam get-user-policy --user-name {{ iam_user_name }} --policy-name {{ item.policy_name }}"
   register: policy_verification
   loop: "{{ iam_user_policies }}"
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Remove any obsolete policies
-  command: aws iam delete-user-policy --user-name "{{ iam_user_name }}" --policy-name "{{ item }}"
+  command: "{{ aws_cmd_prefix }} iam delete-user-policy --user-name {{ iam_user_name }} --policy-name {{ item }}"
   loop: "{{ current_policies.PolicyNames }}"
   when: item not in (iam_user_policies | map(attribute='policy_name') | list)
   failed_when: false
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
-- name: Test IAM user permissions
+- name: Test IAM user permissions (skip if using assumed role)
   command: |
-    aws iam simulate-principal-policy 
+    {{ aws_cmd_prefix }} iam simulate-principal-policy 
     --policy-source-arn "arn:aws:iam::{{ aws_caller_identity.Account }}:user/{{ iam_user_name }}"
     --action-names iam:CreateUser iam:CreateAccessKey iam:ListAccessKeys
     --resource-arns "*"
   register: permission_test
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  when: not (aws_caller_identity.Arn is search('assumed-role'))
+  environment: "{{ aws_env_vars }}"
+
+- name: Test basic IAM access (for assumed roles)
+  command: "{{ aws_cmd_prefix }} iam list-users --max-items 1"
+  register: basic_iam_test
+  when: aws_caller_identity.Arn is search('assumed-role')
+  environment: "{{ aws_env_vars }}"
 
 - name: Set IAM user management completion flag
   set_fact:

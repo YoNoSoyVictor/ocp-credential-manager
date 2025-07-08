@@ -2,19 +2,26 @@
 - name: OpenShift Cloud Credential Operator (CCO) AWS Credential Rotation
   hosts: localhost
   connection: local
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - vars/main.yml
-    - vars/vault.yml  # Contains sensitive variables, should be encrypted with ansible-vault
   
   pre_tasks:
+    - name: Load vault variables if present
+      include_vars: vars/vault.yml
+      failed_when: false
+      
+    - name: Load command templates
+      include_vars: templates/command_templates.yml
+      
     - name: Display playbook information
       debug:
         msg:
           - "OpenShift CCO AWS Credential Rotation Playbook"
-          - "Cluster: {{ ocp_cluster_name | default('undefined') }}"
+          - "Cluster: {{ ocp_cluster_name | default('auto-detect') }}"
           - "AWS Region: {{ ocp_cco_rotation_config.aws_region }}"
-          - "AWS Profile: {{ ocp_cco_rotation_config.aws_profile }}"
+          - "AWS Profile: {{ aws_profile | default('default') }}"
+          - "Kubeconfig: {{ ocp_cco_rotation_config.kubeconfig_path }}"
           - "Dry Run: {{ dry_run | default(false) }}"
           - "Timestamp: {{ ansible_date_time.iso8601 }}"
       tags: ['always']

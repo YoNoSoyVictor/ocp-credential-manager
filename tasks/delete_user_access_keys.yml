@@ -1,0 +1,13 @@
+---
+# Helper task to delete access keys for a single user
+# Expected variable: user_access_keys = [username, [access_key_objects]]
+
+- name: Delete access key for user {{ user_access_keys.0 }}
+  command: |
+    {{ aws_cmd_prefix }} iam delete-access-key 
+    --user-name "{{ user_access_keys.0 }}"
+    --access-key-id "{{ item.AccessKeyId }}"
+  loop: "{{ user_access_keys.1 }}"
+  loop_control:
+    label: "{{ user_access_keys.0 }}: {{ item.AccessKeyId }}"
+  environment: "{{ aws_env_vars }}" 

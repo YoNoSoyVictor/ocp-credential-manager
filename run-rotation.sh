@@ -96,11 +96,10 @@ echo -e "${YELLOW}OpenShift CCO Credential Rotation${NC}"
 echo "=================================="
 echo ""
 
-# Check if required files exist
-if [ ! -f "vars/vault.yml" ]; then
-    echo -e "${RED}Error: vars/vault.yml not found${NC}"
-    echo "Please copy vars/vault.yml.template to vars/vault.yml and configure it"
-    exit 1
+# Check if vault file exists (optional)
+VAULT_FILE_EXISTS=false
+if [ -f "vars/vault.yml" ]; then
+    VAULT_FILE_EXISTS=true
 fi
 
 # Check if ansible-playbook is available
@@ -113,11 +112,13 @@ fi
 # Build ansible-playbook command
 ANSIBLE_CMD="ansible-playbook main.yml"
 
-# Add vault password option
-if [ -n "$VAULT_PASSWORD_FILE" ]; then
-    ANSIBLE_CMD="$ANSIBLE_CMD --vault-password-file $VAULT_PASSWORD_FILE"
-else
-    ANSIBLE_CMD="$ANSIBLE_CMD --ask-vault-pass"
+# Add vault password option (only if vault file exists)
+if [ "$VAULT_FILE_EXISTS" = true ]; then
+    if [ -n "$VAULT_PASSWORD_FILE" ]; then
+        ANSIBLE_CMD="$ANSIBLE_CMD --vault-password-file $VAULT_PASSWORD_FILE"
+    else
+        ANSIBLE_CMD="$ANSIBLE_CMD --ask-vault-pass"
+    fi
 fi
 
 # Add tags if specified
@@ -172,6 +173,7 @@ echo "  Skip Tags: ${SKIP_TAGS:-none}"
 echo "  AWS Profile: ${AWS_PROFILE:-default}"
 echo "  Kubeconfig: ${KUBECONFIG_PATH:-default}"
 echo "  Cluster Name: ${CLUSTER_NAME:-auto-detect}"
+echo "  Vault File: ${VAULT_FILE_EXISTS}"
 echo ""
 
 # Confirmation prompt (unless in dry-run mode)

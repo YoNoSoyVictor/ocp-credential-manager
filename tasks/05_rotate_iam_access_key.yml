@@ -2,14 +2,13 @@
 # Rotate CCO IAM User Access Key
 # Creates a new access key for the CCO IAM user and removes old keys
 
+- name: Load command templates
+  include_vars: "{{ playbook_dir }}/templates/command_templates.yml"
+
 - name: List existing access keys for CCO IAM user
-  command: aws iam list-access-keys --user-name "{{ cco_iam_user_name }}"
+  command: "{{ aws_cmd_prefix }} iam list-access-keys --user-name {{ cco_iam_user_name }}"
   register: existing_access_keys
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Parse existing access keys
   set_fact:
@@ -33,17 +32,13 @@
 
 - name: Deactivate existing access keys (if any)
   command: |
-    aws iam update-access-key 
+    {{ aws_cmd_prefix }} iam update-access-key 
     --user-name "{{ cco_iam_user_name }}"
     --access-key-id "{{ item.AccessKeyId }}"
     --status Inactive
   loop: "{{ current_access_keys.AccessKeyMetadata }}"
   when: current_access_keys.AccessKeyMetadata | length > 0
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Wait before deleting old access keys
   pause:
@@ -52,25 +47,17 @@
 
 - name: Delete existing access keys
   command: |
-    aws iam delete-access-key 
+    {{ aws_cmd_prefix }} iam delete-access-key 
     --user-name "{{ cco_iam_user_name }}"
     --access-key-id "{{ item.AccessKeyId }}"
   loop: "{{ current_access_keys.AccessKeyMetadata }}"
   when: current_access_keys.AccessKeyMetadata | length > 0
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Create new access key for CCO IAM user
-  command: aws iam create-access-key --user-name "{{ cco_iam_user_name }}"
+  command: "{{ aws_cmd_prefix }} iam create-access-key --user-name {{ cco_iam_user_name }}"
   register: new_access_key_result
-  environment:
-    AWS_ACCESS_KEY_ID: "{{ vault_aws_access_key_id }}"
-    AWS_SECRET_ACCESS_KEY: "{{ vault_aws_secret_access_key }}"
-    AWS_SESSION_TOKEN: "{{ vault_aws_session_token | default('') }}"
-    AWS_DEFAULT_REGION: "{{ ocp_cco_rotation_config.aws_region }}"
+  environment: "{{ aws_env_vars }}"
 
 - name: Parse new access key information
   set_fact:
@@ -86,7 +73,7 @@
     msg: "Created new access key: {{ new_access_key_id }}"
 
 - name: Test new access key functionality
-  command: aws sts get-caller-identity
+  command: "{{ aws_cmd_prefix }} sts get-caller-identity"
   register: new_key_test
   environment:
     AWS_ACCESS_KEY_ID: "{{ new_access_key_id }}"
